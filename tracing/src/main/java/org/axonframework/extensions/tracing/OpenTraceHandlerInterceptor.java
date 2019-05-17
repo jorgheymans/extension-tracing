@@ -15,6 +15,9 @@
  */
 package org.axonframework.extensions.tracing;
 
+import static org.axonframework.extensions.tracing.SpanUtils.withMessageTags;
+
+import brave.Tracing;
 import io.opentracing.Scope;
 import io.opentracing.SpanContext;
 import io.opentracing.Tracer;
@@ -26,27 +29,25 @@ import org.axonframework.messaging.MessageHandlerInterceptor;
 import org.axonframework.messaging.MetaData;
 import org.axonframework.messaging.unitofwork.UnitOfWork;
 
-import static org.axonframework.extensions.tracing.SpanUtils.withMessageTags;
-
 
 /**
- * A {@link MessageHandlerInterceptor} which maps the {@link MetaData} to the {@link SpanContext}.
+ * A {@link MessageHandlerInterceptor} which maps the {@link MetaData} to the {@link brave.propagation.TraceContext}.
  *
  * @author Christophe Bouhier
  * @since 4.0
  */
 public class OpenTraceHandlerInterceptor implements MessageHandlerInterceptor<Message<?>> {
 
-    private final Tracer tracer;
+    private final Tracing tracing;
 
     /**
-     * Initialize a {@link MessageHandlerInterceptor} implementation which uses the provided {@link Tracer} to map span
-     * information from the {@link Message} its {@link MetaData} on a {@link SpanContext}.
+     * Initialize a {@link MessageHandlerInterceptor} implementation which uses the provided {@link Tracing} to map span
+     * information from the {@link Message} its {@link MetaData} on a {@link brave.propagation.TraceContext}.
      *
-     * @param tracer the {@link Tracer} used to set a {@link SpanContext} on from a {@link Message}'s {@link MetaData}
+     * @param tracing the {@link Tracing} used to set a {@link brave.propagation.TraceContext} on from a {@link Message}'s {@link MetaData}
      */
-    public OpenTraceHandlerInterceptor(Tracer tracer) {
-        this.tracer = tracer;
+    public OpenTraceHandlerInterceptor(Tracing tracing) {
+        this.tracing = tracing;
     }
 
     @Override
@@ -56,16 +57,17 @@ public class OpenTraceHandlerInterceptor implements MessageHandlerInterceptor<Me
         String operationName = "handle" + SpanUtils.resolveType(unitOfWork.getMessage());
         Tracer.SpanBuilder spanBuilder;
         try {
+
             MapExtractor extractor = new MapExtractor(metaData);
-            SpanContext parentSpan = tracer.extract(Format.Builtin.TEXT_MAP, extractor);
+            SpanContext parentSpan = tracing.extract(Format.Builtin.TEXT_MAP, extractor);
 
             if (parentSpan == null) {
-                spanBuilder = tracer.buildSpan(operationName);
+                spanBuilder = tracing.buildSpan(operationName);
             } else {
-                spanBuilder = tracer.buildSpan(operationName).asChildOf(parentSpan);
+                spanBuilder = tracing.buildSpan(operationName).asChildOf(parentSpan);
             }
         } catch (IllegalArgumentException e) {
-            spanBuilder = tracer.buildSpan(operationName);
+            spanBuilder = tracing.buildSpan(operationName);
         }
 
         try (Scope scope = withMessageTags(spanBuilder, unitOfWork.getMessage()).withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER).startActive(false)) {
