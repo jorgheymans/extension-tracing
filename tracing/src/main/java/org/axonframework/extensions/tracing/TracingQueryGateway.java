@@ -15,9 +15,9 @@
  */
 package org.axonframework.extensions.tracing;
 
-import io.opentracing.Scope;
-import io.opentracing.Span;
-import io.opentracing.Tracer;
+import brave.Span;
+import brave.Tracer;
+import brave.Tracing;
 import org.axonframework.messaging.MessageDispatchInterceptor;
 import org.axonframework.messaging.responsetypes.ResponseType;
 import org.axonframework.queryhandling.DefaultQueryGateway;
@@ -30,20 +30,20 @@ import java.util.concurrent.CompletableFuture;
 import static org.axonframework.common.BuilderUtils.assertNonNull;
 
 /**
- * A tracing query gateway which activates a calling {@link Span}, when the {@link CompletableFuture} completes.
+ * A tracing query gateway which activates a calling {@link brave.Span}, when the {@link CompletableFuture} completes.
  *
  * @author Christophe Bouhier
  * @since 4.0
  */
 public class TracingQueryGateway extends DefaultQueryGateway {
 
-    private final Tracer tracer;
+    private final Tracing tracing;
 
     /**
      * Instantiate a Builder to be able to create a {@link TracingQueryGateway}.
      * <p>
      * The {@code dispatchInterceptors} are defaulted to an empty list.
-     * The {@link Tracer} and {@link QueryBus} are <b>hard requirements</b> and as such should be provided.
+     * The {@link Tracing} and {@link QueryBus} are <b>hard requirements</b> and as such should be provided.
      *
      * @return a Builder to be able to create a {@link TracingQueryGateway}
      */
@@ -53,18 +53,14 @@ public class TracingQueryGateway extends DefaultQueryGateway {
 
     private TracingQueryGateway(Builder builder) {
         super(builder);
-        this.tracer = builder.tracer;
+        this.tracing = builder.tracer;
     }
 
     @Override
     public <R, Q> CompletableFuture<R> query(String queryName, Q query, ResponseType<R> responseType) {
-        Span parentSpan = tracer.activeSpan();
-        try (Scope scope = tracer.buildSpan(queryName).startActive(false)) {
-            Span span = scope.span();
-            return super.query(queryName, query, responseType).whenComplete((r, e) -> {
-                span.finish();
-                tracer.scopeManager().activate(parentSpan, false);
-            });
+        Span newSpan = tracing.tracer().nextSpan().name(queryName).start();
+        try (Tracer.SpanInScope ignored = tracing.tracer().withSpanInScope(newSpan)) {
+            return super.query(queryName, query, responseType).whenComplete((r, e) -> newSpan.finish());
         }
     }
 
@@ -72,11 +68,11 @@ public class TracingQueryGateway extends DefaultQueryGateway {
      * Builder class to instantiate a {@link TracingQueryGateway}.
      * <p>
      * The {@code dispatchInterceptors} are defaulted to an empty list.
-     * The {@link Tracer} and {@link QueryBus} are <b>hard requirements</b> and as such should be provided.
+     * The {@link Tracing} and {@link QueryBus} are <b>hard requirements</b> and as such should be provided.
      */
     public static class Builder extends DefaultQueryGateway.Builder {
 
-        private Tracer tracer;
+        private Tracing tracer;
 
         @Override
         public Builder queryBus(QueryBus queryBus) {
@@ -99,14 +95,14 @@ public class TracingQueryGateway extends DefaultQueryGateway {
         }
 
         /**
-         * Sets the {@link Tracer} used to set a {@link Span} on dispatched {@link QueryMessage}s.
+         * Sets the {@link Tracing} used to set a {@link brave.Span} on dispatched {@link QueryMessage}s.
          *
-         * @param tracer a {@link Tracer} used to set a {@link Span} on dispatched {@link QueryMessage}s.
+         * @param tracing a {@link Tracing} used to set a {@link brave.Span} on dispatched {@link QueryMessage}s.
          * @return the current Builder instance, for fluent interfacing
          */
-        public Builder tracer(Tracer tracer) {
-            assertNonNull(tracer, "Tracer may not be null");
-            this.tracer = tracer;
+        public Builder tracer(Tracing tracing) {
+            assertNonNull(tracing, "Tracing may not be null");
+            this.tracer = tracing;
             return this;
         }
 

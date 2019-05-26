@@ -15,14 +15,11 @@
  */
 package org.axonframework.extensions.tracing;
 
-import static org.axonframework.extensions.tracing.SpanUtils.withMessageTags;
-
+import brave.Span;
+import brave.Tracer;
 import brave.Tracing;
-import io.opentracing.Scope;
-import io.opentracing.SpanContext;
-import io.opentracing.Tracer;
-import io.opentracing.propagation.Format;
-import io.opentracing.tag.Tags;
+import brave.propagation.TraceContext;
+import brave.propagation.TraceContextOrSamplingFlags;
 import org.axonframework.messaging.InterceptorChain;
 import org.axonframework.messaging.Message;
 import org.axonframework.messaging.MessageHandlerInterceptor;
@@ -39,6 +36,7 @@ import org.axonframework.messaging.unitofwork.UnitOfWork;
 public class OpenTraceHandlerInterceptor implements MessageHandlerInterceptor<Message<?>> {
 
     private final Tracing tracing;
+    private final TraceContext.Extractor<Message> commandMessageExtractor;
 
     /**
      * Initialize a {@link MessageHandlerInterceptor} implementation which uses the provided {@link Tracing} to map span
@@ -48,31 +46,28 @@ public class OpenTraceHandlerInterceptor implements MessageHandlerInterceptor<Me
      */
     public OpenTraceHandlerInterceptor(Tracing tracing) {
         this.tracing = tracing;
+        commandMessageExtractor = tracing.propagation().extractor((carrier, key) -> {
+            if (carrier.getMetaData().containsKey(key)) {
+                return carrier.getMetaData().get(key).toString();
+            }
+            return null;
+        });
     }
 
     @Override
     public Object handle(UnitOfWork unitOfWork, InterceptorChain interceptorChain) throws Exception {
-        MetaData metaData = unitOfWork.getMessage().getMetaData();
-
         String operationName = "handle" + SpanUtils.resolveType(unitOfWork.getMessage());
-        Tracer.SpanBuilder spanBuilder;
-        try {
-
-            MapExtractor extractor = new MapExtractor(metaData);
-            SpanContext parentSpan = tracing.extract(Format.Builtin.TEXT_MAP, extractor);
-
-            if (parentSpan == null) {
-                spanBuilder = tracing.buildSpan(operationName);
-            } else {
-                spanBuilder = tracing.buildSpan(operationName).asChildOf(parentSpan);
-            }
-        } catch (IllegalArgumentException e) {
-            spanBuilder = tracing.buildSpan(operationName);
+        TraceContextOrSamplingFlags extracted = commandMessageExtractor.extract(unitOfWork.getMessage());
+        Span span;
+        if (extracted == null) {
+            span = tracing.tracer().nextSpan();
+        } else {
+            span = tracing.tracer().nextSpan(extracted);
         }
-
-        try (Scope scope = withMessageTags(spanBuilder, unitOfWork.getMessage()).withTag(Tags.SPAN_KIND.getKey(), Tags.SPAN_KIND_SERVER).startActive(false)) {
-            //noinspection unchecked
-            unitOfWork.onCleanup(u -> scope.span().finish());
+        span.name(operationName).kind(Span.Kind.SERVER).start();
+        SpanUtils.withMessageTags(span, unitOfWork.getMessage());
+        try(Tracer.SpanInScope ignored = tracing.tracer().withSpanInScope(span)) {
+            unitOfWork.onCleanup(u -> span.finish());
             return interceptorChain.proceed();
         }
     }

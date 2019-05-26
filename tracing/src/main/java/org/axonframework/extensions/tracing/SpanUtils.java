@@ -10,10 +10,10 @@ import org.axonframework.queryhandling.QueryMessage;
  * Utility class providing methods useful for attaching information to Spans
  */
 public class SpanUtils {
-    private static final String TAG_AXON_PAYLOAD_TYPE = "axon.message.payloadtype";
-    private static final String TAG_AXON_ID = "axon.message.id";
-    private static final String TAG_AXON_MSG_TYPE = "axon.message.type";
-    private static final String TAG_AXON_COMMAND_NAME = "axon.message.commandname";
+    static final String TAG_AXON_PAYLOAD_TYPE = "axon.message.payloadtype";
+    static final String TAG_AXON_ID = "axon.message.id";
+    static final String TAG_AXON_MSG_TYPE = "axon.message.type";
+    static final String TAG_AXON_COMMAND_NAME = "axon.message.commandname";
 
     /**
      * Registers message-specific tags to the given {@code Span} based on the given {@code message}.
